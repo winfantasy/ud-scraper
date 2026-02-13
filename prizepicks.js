@@ -13,26 +13,35 @@ function getAgent() {
   return new HttpsProxyAgent(`http://${key}:@api.zyte.com:8011`, { rejectUnauthorized: false });
 }
 
+async function fetchWithRetry(url, opts, maxRetries, log) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, opts);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      // Validate JSON before returning
+      JSON.parse(text);
+      return text;
+    } catch (e) {
+      log(`[PP] Attempt ${attempt}/${maxRetries} failed: ${e.message}`);
+      if (attempt === maxRetries) throw e;
+      await new Promise(r => setTimeout(r, 2000 * attempt));
+    }
+  }
+}
+
 async function fetchAllProjections(log) {
   log = log || console.log;
+  const agent = getAgent();
 
-  // Try direct first (Railway IPs aren't blocked by PP), fall back to Zyte proxy
   const url = `${PP_API}?per_page=10000&state_code=${STATE_CODE}&single_stat=true&game_mode=pickem`;
-  const headers = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' };
   
-  let res;
-  try {
-    res = await fetch(url, { headers, timeout: 60000, size: 50 * 1024 * 1024 });
-    if (!res.ok) throw new Error(`Direct ${res.status}`);
-  } catch (directErr) {
-    log(`[PP] Direct fetch failed (${directErr.message}), trying Zyte proxy...`);
-    const agent = getAgent();
-    res = await fetch(url, { agent, headers, timeout: 120000, size: 50 * 1024 * 1024 });
-    if (!res.ok) throw new Error(`PrizePicks API ${res.status}: ${res.statusText}`);
-  }
+  const raw = await fetchWithRetry(url, {
+    agent,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' },
+    timeout: 120000,
+  }, 3, log);
   
-  const buf = await res.buffer();
-  const raw = buf.toString('utf8');
   log(`[PP] Raw response: ${(raw.length / 1024 / 1024).toFixed(1)}MB`);
   const data = JSON.parse(raw);
 
