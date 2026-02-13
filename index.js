@@ -504,9 +504,17 @@ async function main() {
   // Step 3: Periodic re-hydration as safety net
   setInterval(hydrateFromREST, HYDRATION_INTERVAL_MS);
 
-  // Step 3b: Kalshi hydration
-  await hydrateKalshi();
-  setInterval(hydrateKalshi, KALSHI_INTERVAL_MS);
+  // Step 3b: Kalshi hydration (non-blocking — don't crash if Kalshi fails)
+  try {
+    await hydrateKalshi();
+  } catch (err) {
+    log('ERROR', 'Initial Kalshi hydration failed (non-fatal)', { error: err.message });
+  }
+  setInterval(async () => {
+    try { await hydrateKalshi(); } catch (err) {
+      log('ERROR', 'Periodic Kalshi hydration failed', { error: err.message });
+    }
+  }, KALSHI_INTERVAL_MS);
 
   // Step 4: Log stats every 60s
   setInterval(() => {

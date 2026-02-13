@@ -1,6 +1,9 @@
 // Kalshi API scraper module
 // Fetches sports markets from Kalshi and normalizes into our props format
 
+// Use global fetch if available (Node 18+), else require node-fetch
+const fetchFn = typeof globalThis.fetch === 'function' ? globalThis.fetch : require('node-fetch');
+
 const KALSHI_API = 'https://api.elections.kalshi.com/trade-api/v2';
 
 // Series tickers for sports we care about (player props + game lines)
@@ -74,7 +77,7 @@ function extractLineFromTitle(title) {
 async function fetchWithRetry(url, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
-      const resp = await fetch(url, {
+      const resp = await fetchFn(url, {
         headers: {
           'Accept': 'application/json',
           'User-Agent': 'STACKED-Props-Dashboard/1.0'
