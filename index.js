@@ -1,3 +1,6 @@
+// Required for Zyte proxy (MITM SSL)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
 
