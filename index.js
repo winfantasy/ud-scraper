@@ -447,7 +447,7 @@ const server = http.createServer((req, res) => {
 });
 
 // ─── Kalshi Hydration ───
-const KALSHI_INTERVAL_MS = 120000; // Every 2 minutes (Kalshi updates less frequently)
+const KALSHI_INTERVAL_MS = 300000; // Every 5 minutes (bulk fetch of all open events)
 
 async function hydrateKalshi() {
   if (!scrapeKalshi) {
