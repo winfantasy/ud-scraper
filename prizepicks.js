@@ -31,7 +31,7 @@ async function fetchAllProjections(log) {
     body: JSON.stringify({
       url: targetUrl,
       httpResponseBody: true,
-      httpRequestHeaders: [{ name: 'User-Agent', value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }],
+      customHttpRequestHeaders: [{ name: 'User-Agent', value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }],
     }),
     timeout: 120000,
   });
