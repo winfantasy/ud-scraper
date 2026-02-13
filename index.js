@@ -551,15 +551,14 @@ async function hydrateDraftKings() {
     const rows = dkProps.map(p => ({
       id: p.external_id,
       player_name: p.player_name,
-      sport: p.sport,
+      sport_id: p.sport_id || p.sport,
       stat_type: p.stat_type,
       stat_value: p.line,
       over_price: p.over_price,
       under_price: p.under_price,
       over_decimal: p.over_price,
       under_decimal: p.under_price,
-      game_name: p.game_name,
-      game_start: p.game_start,
+      game_display: p.game_display || p.game_name,
       source: 'draftkings',
       updated_at: new Date().toISOString()
     }));

@@ -103,15 +103,14 @@ async function hydrate(log) {
     props.push({
       id: `pp-${proj.id}`,
       player_name: playerName,
-      sport: sport,
+      sport_id: sport,
       stat_type: statType,
       stat_value: line,
       over_price: null,  // PrizePicks doesn't expose traditional odds
       under_price: null,
       over_decimal: null,
       under_decimal: null,
-      game_name: gameName,
-      game_start: gameStart,
+      game_display: gameName,
       source: 'prizepicks',
       updated_at: new Date().toISOString(),
     });

@@ -216,13 +216,12 @@ async function hydrate(log) {
       allProps.push({
         external_id: `dk-${p.event_id}-${p.offer_id}-${p.player_name}-${p.stat_type}`,
         player_name: p.player_name,
-        sport: p.sport,
+        sport_id: p.sport,
         stat_type: p.stat_type,
         line: p.line,
         over_price: parseOdds(p.odds_american),
         under_price: null, // Will be filled if we find the under
-        game_name: p.event_name,
-        game_start: p.event_start,
+        game_display: p.event_name,
         source: 'draftkings',
       });
     }
