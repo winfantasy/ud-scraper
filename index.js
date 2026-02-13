@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
+const { scrapeKalshi } = require('./kalshi');
 
 // Config
 const PUSHER_URL = 'wss://ws-mt1.pusher.com/app/d65207c183930ff953dc?protocol=7&client=js&version=8.3.0&flash=false';
@@ -112,6 +113,7 @@ async function hydrateFromREST() {
 
       const prop = {
         id: propId,
+        source: 'underdog',
         appearance_id: appearanceId || null,
         player_id: appearance.player_id || null,
         game_id: matchId || null,
@@ -225,6 +227,7 @@ async function handleSwap(channel, payload) {
       // Always update the prop
       const propUpdate = {
         id: propId,
+        source: 'underdog',
         appearance_id: item.appearance_id || cached?.appearance_id || null,
         sport_id: sport,
         stat_value: statValue,
@@ -258,6 +261,7 @@ async function handleSwap(channel, payload) {
           over_decimal: overDecimal,
           under_decimal: underDecimal,
           event_type: 'swap',
+          source: 'underdog',
           recorded_at: now
         });
         if (histError) log('ERROR', 'History insert error', { propId, error: histError.message });
@@ -413,6 +417,79 @@ const server = http.createServer((req, res) => {
   }
 });
 
+// ─── Kalshi Hydration ───
+const KALSHI_INTERVAL_MS = 120000; // Every 2 minutes (Kalshi updates less frequently)
+
+async function hydrateKalshi() {
+  log('INFO', 'Starting Kalshi hydration...');
+  const startTime = Date.now();
+
+  try {
+    const { props: kalshiProps, errors } = await scrapeKalshi();
+
+    if (errors.length > 0) {
+      log('WARN', `Kalshi scrape had ${errors.length} errors`, { errors: errors.slice(0, 5) });
+    }
+
+    if (kalshiProps.length === 0) {
+      log('INFO', 'No active Kalshi props found');
+      return;
+    }
+
+    // Upsert props
+    for (let i = 0; i < kalshiProps.length; i += 500) {
+      const chunk = kalshiProps.slice(i, i + 500);
+      const { error } = await supabase.from('ud_props').upsert(chunk, { onConflict: 'id' });
+      if (error) log('ERROR', 'Kalshi props upsert error', { error: error.message, chunk: i });
+    }
+
+    // Record history (only on first run or if values changed)
+    const historyRows = kalshiProps.map(p => ({
+      prop_id: p.id,
+      appearance_id: null,
+      stat_value: p.stat_value,
+      over_price: p.over_price,
+      under_price: p.under_price,
+      over_decimal: p.over_decimal,
+      under_decimal: p.under_decimal,
+      event_type: 'hydration',
+      source: 'kalshi',
+      recorded_at: new Date().toISOString()
+    }));
+
+    // Only insert history entries that represent changes
+    for (let i = 0; i < historyRows.length; i += 500) {
+      const chunk = historyRows.slice(i, i + 500);
+      const { error } = await supabase.from('ud_line_history').insert(chunk);
+      if (error && !error.message.includes('duplicate')) {
+        log('ERROR', 'Kalshi history insert error', { error: error.message });
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    log('INFO', `Kalshi hydration complete`, { props: kalshiProps.length, errors: errors.length, duration: `${duration}ms` });
+
+    await supabase.from('ud_scrape_runs').insert({
+      run_type: 'kalshi_hydration',
+      props_count: kalshiProps.length,
+      changes_count: kalshiProps.length,
+      duration_ms: duration,
+      status: 'success',
+      started_at: new Date().toISOString()
+    });
+
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    log('ERROR', 'Kalshi hydration failed', { error: err.message, duration: `${duration}ms` });
+    await supabase.from('ud_scrape_runs').insert({
+      run_type: 'kalshi_hydration',
+      status: 'error',
+      error: err.message,
+      started_at: new Date().toISOString()
+    });
+  }
+}
+
 // ─── Main ───
 async function main() {
   const port = process.env.PORT || 3001;
@@ -426,6 +503,10 @@ async function main() {
 
   // Step 3: Periodic re-hydration as safety net
   setInterval(hydrateFromREST, HYDRATION_INTERVAL_MS);
+
+  // Step 3b: Kalshi hydration
+  await hydrateKalshi();
+  setInterval(hydrateKalshi, KALSHI_INTERVAL_MS);
 
   // Step 4: Log stats every 60s
   setInterval(() => {
