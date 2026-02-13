@@ -16,21 +16,21 @@ function getAgent() {
 async function fetchAllProjections(log) {
   log = log || console.log;
 
-  const agent = getAgent();
-
-  // PrizePicks returns all projections in one page (~10MB)
+  // Try direct first (Railway IPs aren't blocked by PP), fall back to Zyte proxy
   const url = `${PP_API}?per_page=10000&state_code=${STATE_CODE}&single_stat=true&game_mode=pickem`;
+  const headers = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' };
   
-  const res = await fetch(url, {
-    agent,
-    headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' },
-    timeout: 120000,
-    size: 50 * 1024 * 1024, // 50MB limit
-  });
-
-  if (!res.ok) throw new Error(`PrizePicks API ${res.status}: ${res.statusText}`);
+  let res;
+  try {
+    res = await fetch(url, { headers, timeout: 60000, size: 50 * 1024 * 1024 });
+    if (!res.ok) throw new Error(`Direct ${res.status}`);
+  } catch (directErr) {
+    log(`[PP] Direct fetch failed (${directErr.message}), trying Zyte proxy...`);
+    const agent = getAgent();
+    res = await fetch(url, { agent, headers, timeout: 120000, size: 50 * 1024 * 1024 });
+    if (!res.ok) throw new Error(`PrizePicks API ${res.status}: ${res.statusText}`);
+  }
   
-  // Collect full response as buffer to avoid stream truncation
   const buf = await res.buffer();
   const raw = buf.toString('utf8');
   log(`[PP] Raw response: ${(raw.length / 1024 / 1024).toFixed(1)}MB`);
