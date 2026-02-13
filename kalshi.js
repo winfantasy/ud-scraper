@@ -21,6 +21,15 @@ const PLAYER_PROP_SERIES = {
   KXNBABLK: { sport: 'NBA', stat: 'Blocks' },
 };
 
+// All-Star / contest series (winner markets — binary yes/no per player)
+const WINNER_SERIES = {
+  KXNBA3PTCONTEST: { sport: '3PT', stat: '3PT Contest Winner' },
+  KXNBASLAMDUNK: { sport: 'DUNK', stat: 'Dunk Contest Winner' },
+  KXNBAALLSTARGAME: { sport: 'NBA', stat: 'All-Star Game Winner' },
+  KXNBAALLSTARMVP: { sport: 'NBA', stat: 'All-Star Game MVP' },
+  KXNBACELEBRITY3PT: { sport: 'CELEB3PT', stat: 'Celebrity 3PT Winner' },
+};
+
 const GAME_LINE_SERIES = {
   // NBA game lines
   KXNBAGAME: { sport: 'NBA', stat: 'Moneyline' },
@@ -283,6 +292,57 @@ function processGameLineEvents(events, seriesConfig) {
   return props;
 }
 
+// Process winner markets (binary yes/no per player — e.g. "Will X win the 3PT contest?")
+function processWinnerEvents(events, seriesConfig) {
+  const props = [];
+
+  for (const event of events) {
+    const markets = event.markets || [];
+    
+    for (const market of markets) {
+      if (market.status !== 'open' && market.status !== 'active') continue;
+      
+      // Extract player name from title: "Will Kon Knueppel win the 2026 3-Point Contest?"
+      let playerName = 'Unknown';
+      const nameMatch = market.title?.match(/^Will (.+?) win/i);
+      if (nameMatch) {
+        playerName = nameMatch[1].trim();
+      } else if (market.subtitle) {
+        playerName = market.subtitle.replace(/^::\s*/, '').trim();
+      }
+
+      // yes_bid in cents = implied probability of winning
+      const yesBid = market.yes_bid || 0;
+      const yesAsk = market.yes_ask || 0;
+      
+      props.push({
+        id: `kalshi_${market.ticker}`,
+        appearance_id: null,
+        player_id: null,
+        game_id: event.event_ticker,
+        sport_id: seriesConfig.sport,
+        stat_type: seriesConfig.stat,
+        stat_display: seriesConfig.stat,
+        stat_value: yesBid, // Use yes_bid as the "line" (implied probability in cents)
+        over_price: centsToAmerican(yesBid),  // American odds for "yes"
+        under_price: centsToAmerican(100 - yesAsk), // American odds for "no"  
+        over_decimal: yesBid ? (yesBid / 100) : null,
+        under_decimal: (100 - yesAsk) ? ((100 - yesAsk) / 100) : null,
+        line_type: 'winner',
+        status: 'active',
+        choice_display: `${yesBid}¢ yes / ${100 - yesAsk}¢ no`,
+        player_name: playerName,
+        team_abbr: market.subtitle?.replace(/^::\s*/, '').trim() || null,
+        game_display: event.title || seriesConfig.stat,
+        source: 'kalshi',
+        updated_at: market.updated_time || new Date().toISOString()
+      });
+    }
+  }
+
+  return props;
+}
+
 // Main scrape function
 async function scrapeKalshi() {
   const allProps = [];
@@ -309,6 +369,20 @@ async function scrapeKalshi() {
       const events = await fetchSeriesEvents(ticker);
       if (events.length > 0) {
         const props = processGameLineEvents(events, config);
+        allProps.push(...props);
+      }
+      await new Promise(r => setTimeout(r, 200));
+    } catch (err) {
+      errors.push({ ticker, error: err.message });
+    }
+  }
+
+  // Scrape winner markets (3PT contest, dunk contest, etc.)
+  for (const [ticker, config] of Object.entries(WINNER_SERIES)) {
+    try {
+      const events = await fetchSeriesEvents(ticker);
+      if (events.length > 0) {
+        const props = processWinnerEvents(events, config);
         allProps.push(...props);
       }
       await new Promise(r => setTimeout(r, 200));
