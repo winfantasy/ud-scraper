@@ -13,13 +13,22 @@ try {
   console.error('[BOOT] Failed to load Kalshi module:', err.message);
 }
 
-// Lazy-load DraftKings module
-let dkHydrate = null;
+// DraftKings module disabled — blocked by Akamai
+// let dkHydrate = null;
+// try {
+//   dkHydrate = require('./draftkings').hydrate;
+//   console.log('[BOOT] DraftKings module loaded successfully');
+// } catch (err) {
+//   console.error('[BOOT] Failed to load DraftKings module:', err.message);
+// }
+
+// Lazy-load FanDuel module
+let fdHydrate = null;
 try {
-  dkHydrate = require('./draftkings').hydrate;
-  console.log('[BOOT] DraftKings module loaded successfully');
+  fdHydrate = require('./fanduel').hydrate;
+  console.log('[BOOT] FanDuel module loaded successfully');
 } catch (err) {
-  console.error('[BOOT] Failed to load DraftKings module:', err.message);
+  console.error('[BOOT] Failed to load FanDuel module:', err.message);
 }
 
 // Lazy-load PrizePicks module
@@ -523,57 +532,41 @@ async function hydrateKalshi() {
   }
 }
 
-// ─── DraftKings Hydration ───
-const DK_INTERVAL_MS = 180000; // Every 3 minutes
+// ─── FanDuel Hydration ───
+const FD_INTERVAL_MS = 180000; // Every 3 minutes
 
-async function hydrateDraftKings() {
-  if (!dkHydrate) {
-    log('WARN', 'DraftKings module not loaded, skipping');
+async function hydrateFanDuel() {
+  if (!fdHydrate) {
+    log('WARN', 'FanDuel module not loaded, skipping');
     return;
   }
-  log('INFO', 'Starting DraftKings hydration...');
+  log('INFO', 'Starting FanDuel hydration...');
   const startTime = Date.now();
 
   try {
-    const dkProps = await dkHydrate((...args) => log('INFO', ...args));
+    const fdProps = await fdHydrate((...args) => log('INFO', ...args));
 
-    if (dkProps.length === 0) {
-      log('INFO', 'No active DraftKings props found');
+    if (fdProps.length === 0) {
+      log('INFO', 'No active FanDuel props found');
       await supabase.from('ud_scrape_runs').insert({
-        run_type: 'dk_hydration', props_count: 0, changes_count: 0,
+        run_type: 'fd_hydration', props_count: 0, changes_count: 0,
         duration_ms: Date.now() - startTime, status: 'success',
         started_at: new Date().toISOString()
       });
       return;
     }
 
-    // Map to ud_props format
-    const rows = dkProps.map(p => ({
-      id: p.external_id,
-      player_name: p.player_name,
-      sport_id: p.sport_id || p.sport,
-      stat_type: p.stat_type,
-      stat_value: p.line,
-      over_price: p.over_price,
-      under_price: p.under_price,
-      over_decimal: p.over_price,
-      under_decimal: p.under_price,
-      game_display: p.game_display || p.game_name,
-      source: 'draftkings',
-      updated_at: new Date().toISOString()
-    }));
-
     // Upsert in chunks
     let upserted = 0;
-    for (let i = 0; i < rows.length; i += 500) {
-      const chunk = rows.slice(i, i + 500);
+    for (let i = 0; i < fdProps.length; i += 500) {
+      const chunk = fdProps.slice(i, i + 500);
       const { error } = await supabase.from('ud_props').upsert(chunk, { onConflict: 'id' });
-      if (error) log('ERROR', 'DK props upsert error', { error: error.message, chunk: i });
+      if (error) log('ERROR', 'FD props upsert error', { error: error.message, chunk: i });
       else upserted += chunk.length;
     }
 
     // Insert history
-    const historyRows = rows.map(p => ({
+    const historyRows = fdProps.map(p => ({
       prop_id: p.id,
       appearance_id: null,
       stat_value: p.stat_value,
@@ -582,7 +575,7 @@ async function hydrateDraftKings() {
       over_decimal: p.over_decimal,
       under_decimal: p.under_decimal,
       event_type: 'hydration',
-      source: 'draftkings',
+      source: 'fanduel',
       recorded_at: new Date().toISOString()
     }));
 
@@ -590,22 +583,22 @@ async function hydrateDraftKings() {
       const chunk = historyRows.slice(i, i + 500);
       const { error } = await supabase.from('ud_line_history').insert(chunk);
       if (error && !error.message.includes('duplicate')) {
-        log('ERROR', 'DK history insert error', { error: error.message });
+        log('ERROR', 'FD history insert error', { error: error.message });
       }
     }
 
     const duration = Date.now() - startTime;
-    log('INFO', `DraftKings hydration complete`, { props: dkProps.length, upserted, duration: `${duration}ms` });
+    log('INFO', `FanDuel hydration complete`, { props: fdProps.length, upserted, duration: `${duration}ms` });
 
     await supabase.from('ud_scrape_runs').insert({
-      run_type: 'dk_hydration', props_count: dkProps.length, changes_count: upserted,
+      run_type: 'fd_hydration', props_count: fdProps.length, changes_count: upserted,
       duration_ms: duration, status: 'success', started_at: new Date().toISOString()
     });
   } catch (err) {
     const duration = Date.now() - startTime;
-    log('ERROR', 'DraftKings hydration failed', { error: err.message, duration: `${duration}ms` });
+    log('ERROR', 'FanDuel hydration failed', { error: err.message, duration: `${duration}ms` });
     await supabase.from('ud_scrape_runs').insert({
-      run_type: 'dk_hydration', status: 'error', error: err.message,
+      run_type: 'fd_hydration', status: 'error', error: err.message,
       started_at: new Date().toISOString()
     });
   }
@@ -710,17 +703,17 @@ async function main() {
     }
   }, KALSHI_INTERVAL_MS);
 
-  // Step 4: DraftKings hydration (non-blocking)
+  // Step 4: FanDuel hydration (non-blocking)
   try {
-    await hydrateDraftKings();
+    await hydrateFanDuel();
   } catch (err) {
-    log('ERROR', 'Initial DraftKings hydration failed (non-fatal)', { error: err.message });
+    log('ERROR', 'Initial FanDuel hydration failed (non-fatal)', { error: err.message });
   }
   setInterval(async () => {
-    try { await hydrateDraftKings(); } catch (err) {
-      log('ERROR', 'Periodic DraftKings hydration failed', { error: err.message });
+    try { await hydrateFanDuel(); } catch (err) {
+      log('ERROR', 'Periodic FanDuel hydration failed', { error: err.message });
     }
-  }, DK_INTERVAL_MS);
+  }, FD_INTERVAL_MS);
 
   // Step 5: PrizePicks hydration (non-blocking)
   try {
